@@ -37,6 +37,8 @@ class Config:
     discount: float = 0.99
     tau: float = 5e-3
     n_critic: int = 2
+    critic_layernorm: bool = False
+    critic_init_layernorm: bool = False
     dropout_rate: float = -1.0  # -1.0 means no dropout
     activation: str = "relu"
     # training params
@@ -65,20 +67,13 @@ class Config:
             r_interval = int(reset_interval / 1e5)
         else:
             r_interval = reset_interval / 1e5
-        self.name = (
-            f"ARS-NReset{self.n_reset}-Interval{r_interval}e5"
-            + f"-batch{self.batch_size}"
-            + f"-n-layer{self.n_layer}"
-            + f"-hidden{self.hidden_dim}"
-            + f"-n-q{self.n_critic}"
-            + f"-ntrain{self.n_train_per_step}"
-            + f"-activate={self.activation}"
-        )
-        if self.replay_buffer_size != int(1e6):
-            if self.replay_buffer_size % 1e5 == 0.0:
-                self.name += f"-replay-size{int(self.replay_buffer_size/1e5)}e5"
-            else:
-                self.name += f"-replay-size{self.replay_buffer_size/1e5}e5"
+        alg_name = "ARS"
+        if self.critic_layernorm and self.critic_init_layernorm:
+            alg_name += "-LN-ILN"
+        elif self.critic_layernorm:
+            alg_name += "-LN"
+
+        self.name = f"{alg_name}-NReset{self.n_reset}-Interval{r_interval}e5"
 
 
 def make_benchmark(domain: str, benchmark_name: str, seed: int) -> gym.Env:

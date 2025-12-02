@@ -11,6 +11,7 @@ class Critic(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     dropout_rate: Optional[float] = -1
     layer_norm: bool = False
+    init_layer_norm: bool = False
     dtype: Optional[Dtype] = jnp.float32
 
     @nn.compact
@@ -21,6 +22,7 @@ class Critic(nn.Module):
             activations=self.activations,
             dropout_rate=self.dropout_rate,
             layer_norm=self.layer_norm,
+            init_layer_norm=self.init_layer_norm,
             dtype=self.dtype,
         )(inputs)
 
@@ -59,6 +61,7 @@ class EnsembleCritic(nn.Module):
     n_ensemble: int = 10
     dropout_rate: Optional[float] = -1
     layer_norm: bool = False
+    init_layer_norm: bool = False
     dtype: Optional[Dtype] = jnp.float32
     name: str = "critic"
 
@@ -78,6 +81,7 @@ class EnsembleCritic(nn.Module):
             self.activations,
             self.dropout_rate,
             self.layer_norm,
+            self.init_layer_norm,
             self.dtype,
         )(observations, actions)
         return q_values

@@ -79,6 +79,8 @@ class Learner(object):
         n_task: int = 1,
         n_critic: int = 2,
         softplus: bool = True,
+        critic_layernorm: bool = False,
+        critic_init_layernorm: bool = False,
         activation: str = "relu",
     ):
 
@@ -127,6 +129,8 @@ class Learner(object):
             activations=activation_func(activation),
             n_ensemble=n_critic,
             name="critic",
+            layer_norm=critic_layernorm,
+            init_layer_norm=critic_init_layernorm,
         )
         critic = MultiModel.create(
             critic_def,
