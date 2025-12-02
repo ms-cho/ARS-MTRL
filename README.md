@@ -27,7 +27,9 @@ pip install --upgrade "jax[cuda12_pip]==0.4.24" -f https://storage.googleapis.co
 
 ### Run training
 
+```bash
 export XLA_PYTHON_CLIENT_PREALLOCATE=false && export PYTHONPATH=$(pwd):${PYTHONPATH} && conda activate ARS && export CUDA_VISIBLE_DEVICES=0
+```
 
 MT10
 ```bash
