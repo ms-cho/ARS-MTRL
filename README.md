@@ -4,9 +4,11 @@
 
 ### Install dependencies
 
+```bash
 conda create -n ARS python=3.9
 conda activate ARS
 conda install gcc==12.1.0  or  conda install -c conda-forge libstdcxx-ng=12
+```
 
 ```bash
 pip install --upgrade pip==21.0
@@ -25,7 +27,7 @@ pip install --upgrade "jax[cuda12_pip]==0.4.24" -f https://storage.googleapis.co
 
 ### Run training
 
-export XLA_PYTHON_CLIENT_PREALLOCATE=false && export PYTHONPATH=$(pwd):${PYTHONPATH} && conda activate icml25ARS && export CUDA_VISIBLE_DEVICES=0
+export XLA_PYTHON_CLIENT_PREALLOCATE=false && export PYTHONPATH=$(pwd):${PYTHONPATH} && conda activate ARS && export CUDA_VISIBLE_DEVICES=0
 
 MT10
 ```bash
