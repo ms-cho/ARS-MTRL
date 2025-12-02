@@ -29,12 +29,12 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false && export PYTHONPATH=$(pwd):${PYTHONP
 
 MT10
 ```bash
-python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_args domain=metaworld env_name=MT10 activation=tanh n_layer=4 hidden_dim=400 random_goal=True batch_size=100 n_reset=4
+python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_args domain=metaworld env_name=MT10 activation=tanh n_layer=4 hidden_dim=400 random_goal=True batch_size=100 n_reset=4 critic_layernorm=True  critic_init_layernorm=True
 ```
 
 MT50
 ```bash
-python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_args domain=metaworld env_name=MT50 activation=tanh n_layer=4 hidden_dim=400 random_goal=True batch_size=100 replay_buffer_size=500000 n_reset=6
+python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_args domain=metaworld env_name=MT50 activation=tanh n_layer=4 hidden_dim=400 random_goal=True batch_size=100 replay_buffer_size=500000 n_reset=6 critic_layernorm=True  critic_init_layernorm=True
 ```
 
 ## Misc

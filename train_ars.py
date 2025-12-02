@@ -53,6 +53,8 @@ class Config:
     replay_buffer_size: int = int(1e6)
     initial_step: int = int(25e3)
     n_train_per_step: int = 1
+    # env params
+    max_path_length: int = 500
     # evaluation params
     eval_episodes: int = 1
     eval_interval: int = int(1e4)
@@ -61,7 +63,7 @@ class Config:
     eval_seed: int = 42
 
     def __post_init__(self):
-        self.group = f"{self.domain}-{self.env_name}"
+        self.group = f"{self.domain}-{self.env_name}(H={self.max_path_length})"
         reset_interval = math.ceil(self.max_steps / (1000 * (self.n_reset + 1))) * 1000
         if reset_interval % 1e5 == 0:
             r_interval = int(reset_interval / 1e5)
@@ -76,7 +78,9 @@ class Config:
         self.name = f"{alg_name}-NReset{self.n_reset}-Interval{r_interval}e5"
 
 
-def make_benchmark(domain: str, benchmark_name: str, seed: int) -> gym.Env:
+def make_benchmark(
+    domain: str, benchmark_name: str, seed: int, max_path_length: int = 500
+) -> gym.Env:
     try:
         benchmark_class = getattr(metaworld, benchmark_name)
         benchmark = benchmark_class(seed=seed)
@@ -101,6 +105,8 @@ def make_benchmark(domain: str, benchmark_name: str, seed: int) -> gym.Env:
         env.action_space.seed(seed + env_id + 1)
         env.observation_space.seed(seed + env_id + 1)
 
+        env.max_path_length = max_path_length
+
         envs.append(env)
 
         tasks_per_env[env_names[env_id]] = tasks[env_id * 50 : (env_id + 1) * 50]
@@ -108,7 +114,9 @@ def make_benchmark(domain: str, benchmark_name: str, seed: int) -> gym.Env:
     return envs, env_names, tasks_per_env
 
 
-def make_eval_benchmark(domain: str, benchmark_name: str, seed: int, tasks) -> gym.Env:
+def make_eval_benchmark(
+    domain: str, benchmark_name: str, seed: int, tasks, max_path_length: int = 500
+) -> gym.Env:
     try:
         benchmark_class = getattr(metaworld, benchmark_name)
         benchmark = benchmark_class(seed=seed)
@@ -130,6 +138,8 @@ def make_eval_benchmark(domain: str, benchmark_name: str, seed: int, tasks) -> g
         env.action_space.seed(seed + env_id + 1)
         env.observation_space.seed(seed + env_id + 1)
 
+        env.max_path_length = max_path_length
+
         envs.append(env)
 
     return envs
@@ -145,9 +155,7 @@ def main(config: Config):
     )
 
     envs, env_names, tasks = make_benchmark(
-        config.domain,
-        config.env_name,
-        config.seed,
+        config.domain, config.env_name, config.seed, config.max_path_length
     )
     env_names = list(env_names)
     env = wrappers.MultiParallelEnvExecutor(envs)
@@ -158,7 +166,11 @@ def main(config: Config):
         env_name: tasks_per_env[:10] for env_name, tasks_per_env in tasks.items()
     }
     eval_envs = make_eval_benchmark(
-        config.domain, config.env_name, config.eval_seed, eval_tasks
+        config.domain,
+        config.env_name,
+        config.eval_seed,
+        eval_tasks,
+        config.max_path_length,
     )
     eval_env = wrappers.MultiParallelEnvExecutor(eval_envs, 10, eval_tasks)
 
