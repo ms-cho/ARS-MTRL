@@ -101,27 +101,38 @@ def load_model(
     )
 
 
-def flat_vals(vals, path=None, n_task=None):
-    if path is None:
-        path = []
+def extract_dense_kernels(params):
+    """
+    Return a simple dict of base Dense kernels,
+    e.g. {'dense_0': {'kernel': ...}, 'dense_1': {'kernel': ...}, ...}
+    """
+    base_dict = {}
+    idx = 0
+    for k, v in params.items():
+        # Typically "Dense_0", "Dense_1", etc.
+        if "Dense_" in k:
+            base_dict[f"dense_{idx}"] = {"kernel": v["kernel"], "bias": v["bias"]}
+            idx += 1
+        elif k == "means" or k == "log_stds":
+            base_dict[k] = {"kernel": v["kernel"], "bias": v["bias"]}
+    return base_dict
 
-    values = []
-    keys = []
-    for key, value in vals.items():
-        new_path = path + [key]
-        if isinstance(value, dict):
-            # If the value is a dictionary, make a recursive call
-            keys_, values_ = flat_vals(value, new_path, n_task)
-            values.extend(values_)
-            keys.extend(keys_)
-        else:
-            # Otherwise, add the value to the list
-            if n_task is None:
-                values.append(value.reshape((-1,)))
-            else:
-                values.append(value.reshape((n_task, -1)))
-            keys.append("/".join(new_path))
-    return keys, values
+
+def extract_ln_params(params):
+    """
+    Returns a dictionary that maps layernorm module names to (scale, bias).
+    E.g. {
+        'LayerNorm_0': { 'scale': ..., 'bias': ... },
+        'LayerNorm_1': { 'scale': ..., 'bias': ... },
+        ...
+    }
+    """
+    ln_dict = {}
+    for k, v in params.items():
+        # If it looks like "LayerNorm_..." or your naming pattern
+        if "LayerNorm_" in k:
+            ln_dict[k] = {"scale": v["scale"], "bias": v["bias"]}
+    return ln_dict
 
 
 def default_init(scale: Optional[float] = jnp.sqrt(2)):
@@ -138,6 +149,49 @@ InfoDict = Dict[str, float]
 def SwiGLU(x):
     x, gate = jnp.split(x, 2, axis=-1)
     return nn.silu(gate) * x
+
+
+class LoRAMultiDense(nn.Module):
+    features: int
+    rank: int = 4
+    alpha: float = 1.0
+    n_task: int = 1
+    base_kernel: Optional[jnp.ndarray] = None
+    base_bias: Optional[jnp.ndarray] = None
+    """
+    base_kernel will be the frozen weight (pretrained).
+    We'll learn only the low-rank adapters for each task T_i.
+    """
+
+    @nn.compact
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        # Compute the base output from the frozen pretrained kernel if provided.
+        if self.base_kernel is not None:
+            base_output = jnp.einsum("tbi,if->tbf", x, self.base_kernel)
+            if self.base_bias is not None:
+                base_output += self.base_bias
+        else:
+            base_output = nn.Dense(self.features, use_bias=True)(x)
+
+        # Initialize LoRA adapter parameters per task.
+        lora_down = self.param(
+            "lora_down",
+            nn.initializers.lecun_normal(),
+            (x.shape[-1], self.rank, self.n_task),
+        )
+        lora_up = self.param(
+            "lora_up",
+            nn.initializers.zeros,
+            (self.rank, self.features, self.n_task),
+        )
+
+        # Compute the low-rank update using einsum:
+        # For each task t, delta[t, b, f] = sum_{i,r} x[t, b, i] * lora_down[i, r, t] * lora_up[r, f, t]
+        delta = jnp.einsum("tbi,irt,rft->tbf", x, lora_down, lora_up)
+        scaling = self.alpha / self.rank
+        delta = delta * scaling
+
+        return base_output + delta
 
 
 class MLP(nn.Module):
@@ -159,6 +213,53 @@ class MLP(nn.Module):
                 if self.layer_norm:
                     x = nn.LayerNorm()(x)
                 x = self.activations(x)
+                if self.dropout_rate >= 0:
+                    x = nn.Dropout(rate=self.dropout_rate)(
+                        x, deterministic=not training
+                    )
+        return x
+
+
+class LoRAMulti_MLP(nn.Module):
+    hidden_dims: Sequence[int]
+    rank: int = 4
+    alpha: float = 1.0
+    n_task: int = 1
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    activate_final: bool = False
+    base_params: Optional[Dict] = None
+    init_layer_norm: bool = False
+    layer_norm: bool = False
+    dropout_rate: float = -1.0
+
+    @nn.compact
+    def __call__(self, x: jnp.ndarray, training: bool = False) -> jnp.ndarray:
+        if x.ndim == 2:
+            x = jnp.expand_dims(x, axis=1)
+        # optional LN at input
+        if self.init_layer_norm:
+            x = nn.LayerNorm()(x)
+
+        for i, size in enumerate(self.hidden_dims):
+            # LoRA Dense
+            base_kernel = None
+            if self.base_params is not None:
+                base_kernel = self.base_params[f"dense_{i}"]["kernel"]
+                base_bias = self.base_params[f"dense_{i}"]["bias"]
+            x = LoRAMultiDense(
+                features=size,
+                rank=self.rank,
+                alpha=self.alpha,
+                n_task=self.n_task,
+                base_kernel=base_kernel,
+                base_bias=base_bias,
+                name=f"lora_dense_{i}",
+            )(x)
+            if i + 1 < len(self.hidden_dims) or self.activate_final:
+                if self.layer_norm:
+                    x = nn.LayerNorm()(x)
+                x = self.activations(x)
+                # Optional dropout
                 if self.dropout_rate >= 0:
                     x = nn.Dropout(rate=self.dropout_rate)(
                         x, deterministic=not training
@@ -208,7 +309,6 @@ class Model:
             info = aux[1]
 
             updates, new_opt_state = self.tx.update(grads, self.opt_state, self.params)
-            info.update({"grad/{}".format(self.apply_fn.name): grads})
 
             new_params = optax.apply_updates(self.params, updates)
             return (
