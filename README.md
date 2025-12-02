@@ -4,8 +4,8 @@
 
 ### Install dependencies
 
-conda create -n icml25ARS python=3.9
-conda activate icml25ARS
+conda create -n ARS python=3.9
+conda activate ARS
 conda install gcc==12.1.0  or  conda install -c conda-forge libstdcxx-ng=12
 
 ```bash
