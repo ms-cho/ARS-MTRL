@@ -57,9 +57,10 @@ python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_
 ```
 
 For horizon length 150
-```bash
+```bash MT10
 python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_args domain=metaworld env_name=MT10 activation=relu n_layer=4 hidden_dim=400 random_goal=True batch_size=100 n_reset=4 critic_layernorm=True  critic_init_layernorm=True max_path_length=150
-
+```
+```bash
 python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_args domain=metaworld env_name=MT50 activation=tanh n_layer=4 hidden_dim=1024 random_goal=True batch_size=100 replay_buffer_size=200000 n_reset=9 critic_layernorm=True  critic_init_layernorm=True max_path_length=150
 ```
 
