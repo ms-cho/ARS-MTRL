@@ -1,0 +1,35 @@
+2025-12-03 02:25:54,441 INFO    MainThread:3690891 [wandb_setup.py:_flush():76] Current SDK version is 0.17.0
+2025-12-03 02:25:54,441 INFO    MainThread:3690891 [wandb_setup.py:_flush():76] Configure stats pid to 3690891
+2025-12-03 02:25:54,441 INFO    MainThread:3690891 [wandb_setup.py:_flush():76] Loading settings from /home/wisrl/.config/wandb/settings
+2025-12-03 02:25:54,441 INFO    MainThread:3690891 [wandb_setup.py:_flush():76] Loading settings from /home/wisrl/mscho/ARS-MTRL/wandb/settings
+2025-12-03 02:25:54,441 INFO    MainThread:3690891 [wandb_setup.py:_flush():76] Loading settings from environment variables: {}
+2025-12-03 02:25:54,441 INFO    MainThread:3690891 [wandb_setup.py:_flush():76] Applying setup settings: {'_disable_service': False}
+2025-12-03 02:25:54,441 INFO    MainThread:3690891 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program_relpath': 'run_experiments.py', 'program_abspath': '/home/wisrl/mscho/ARS-MTRL/run_experiments.py', 'program': '/home/wisrl/mscho/ARS-MTRL/run_experiments.py'}
+2025-12-03 02:25:54,441 INFO    MainThread:3690891 [wandb_setup.py:_flush():76] Applying login settings: {}
+2025-12-03 02:25:54,442 INFO    MainThread:3690891 [wandb_init.py:_log_setup():520] Logging user logs to /home/wisrl/mscho/ARS-MTRL/wandb/run-20251203_022554-f6280b2c-08af-4de4-843e-4a0c7df2e581/logs/debug.log
+2025-12-03 02:25:54,442 INFO    MainThread:3690891 [wandb_init.py:_log_setup():521] Logging internal logs to /home/wisrl/mscho/ARS-MTRL/wandb/run-20251203_022554-f6280b2c-08af-4de4-843e-4a0c7df2e581/logs/debug-internal.log
+2025-12-03 02:25:54,442 INFO    MainThread:3690891 [wandb_init.py:init():560] calling init triggers
+2025-12-03 02:25:54,442 INFO    MainThread:3690891 [wandb_init.py:init():567] wandb.init called with sweep_config: {}
+config: {'project': 'MTRL', 'group': 'metaworld-MT10(H=500)', 'name': 'ARS-LN-ILN-NReset4-Interval4e5', 'actor_lr': 0.0003, 'critic_lr': 0.0003, 'value_lr': 0.0003, 'hidden_dim': 400, 'n_layer': 4, 'discount': 0.99, 'tau': 0.005, 'n_critic': 2, 'critic_layernorm': True, 'critic_init_layernorm': True, 'dropout_rate': -1.0, 'activation': 'tanh', 'domain': 'metaworld', 'env_name': 'MT10', 'batch_size': 100, 'max_steps': 2000000, 'log_interval': 1000, 'n_reset': 4, 'schedule_interval': 1000, 'opt_decay_schedule': '', 'replay_buffer_size': 1000000, 'initial_step': 25000, 'n_train_per_step': 1, 'max_path_length': 500, 'eval_episodes': 1, 'eval_interval': 10000, 'seed': 3, 'eval_seed': 42}
+2025-12-03 02:25:54,442 INFO    MainThread:3690891 [wandb_init.py:init():610] starting backend
+2025-12-03 02:25:54,442 INFO    MainThread:3690891 [wandb_init.py:init():614] setting up manager
+2025-12-03 02:25:54,442 INFO    MainThread:3690891 [backend.py:_multiprocessing_setup():105] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2025-12-03 02:25:54,442 INFO    MainThread:3690891 [wandb_init.py:init():622] backend started and connected
+2025-12-03 02:25:54,443 INFO    MainThread:3690891 [wandb_init.py:init():711] updated telemetry
+2025-12-03 02:25:54,491 INFO    MainThread:3690891 [wandb_init.py:init():744] communicating run to backend with 90.0 second timeout
+2025-12-03 02:25:55,820 INFO    MainThread:3690891 [wandb_run.py:_on_init():2396] communicating current version
+2025-12-03 02:25:55,858 INFO    MainThread:3690891 [wandb_run.py:_on_init():2405] got version response upgrade_message: "wandb version 0.23.0 is available!  To upgrade, please run:\n $ pip install wandb --upgrade"
+
+2025-12-03 02:25:55,858 INFO    MainThread:3690891 [wandb_init.py:init():795] starting run threads in backend
+2025-12-03 02:25:56,700 INFO    MainThread:3690891 [wandb_run.py:_console_start():2374] atexit reg
+2025-12-03 02:25:56,700 INFO    MainThread:3690891 [wandb_run.py:_redirect():2229] redirect: wrap_raw
+2025-12-03 02:25:56,700 INFO    MainThread:3690891 [wandb_run.py:_redirect():2294] Wrapping output streams.
+2025-12-03 02:25:56,700 INFO    MainThread:3690891 [wandb_run.py:_redirect():2319] Redirects installed.
+2025-12-03 02:25:56,700 INFO    MainThread:3690891 [wandb_init.py:init():838] run started, returning control to user process
+2025-12-03 04:26:10,473 INFO    MainThread:3690891 [wandb_run.py:_finish():2103] finishing run mscho/MTRL/f6280b2c-08af-4de4-843e-4a0c7df2e581
+2025-12-03 04:26:10,473 INFO    MainThread:3690891 [wandb_run.py:_atexit_cleanup():2343] got exitcode: 0
+2025-12-03 04:26:10,474 INFO    MainThread:3690891 [wandb_run.py:_restore():2326] restore
+2025-12-03 04:26:10,474 INFO    MainThread:3690891 [wandb_run.py:_restore():2332] restore done
+2025-12-03 04:26:16,555 INFO    MainThread:3690891 [wandb_run.py:_footer_history_summary_info():3994] rendering history
+2025-12-03 04:26:16,558 INFO    MainThread:3690891 [wandb_run.py:_footer_history_summary_info():4026] rendering summary
+2025-12-03 04:26:16,562 INFO    MainThread:3690891 [wandb_run.py:_footer_sync_info():3953] logging synced files

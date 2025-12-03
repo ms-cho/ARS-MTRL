@@ -1,0 +1,128 @@
+wandb_version: 1
+
+project:
+  desc: null
+  value: MTRL
+group:
+  desc: null
+  value: metaworld-MT10(H=500)
+name:
+  desc: null
+  value: ARS-LoRA-LN-ILN-NReset4-Interval4e5
+actor_lr:
+  desc: null
+  value: 0.0003
+critic_lr:
+  desc: null
+  value: 0.0003
+value_lr:
+  desc: null
+  value: 0.0003
+hidden_dim:
+  desc: null
+  value: 400
+n_layer:
+  desc: null
+  value: 4
+discount:
+  desc: null
+  value: 0.99
+tau:
+  desc: null
+  value: 0.005
+n_critic:
+  desc: null
+  value: 2
+critic_layernorm:
+  desc: null
+  value: true
+critic_init_layernorm:
+  desc: null
+  value: true
+dropout_rate:
+  desc: null
+  value: -1.0
+activation:
+  desc: null
+  value: tanh
+rank:
+  desc: null
+  value: 8
+domain:
+  desc: null
+  value: metaworld
+env_name:
+  desc: null
+  value: MT10
+batch_size:
+  desc: null
+  value: 100
+max_steps:
+  desc: null
+  value: 2000000
+log_interval:
+  desc: null
+  value: 1000
+n_reset:
+  desc: null
+  value: 4
+threshold:
+  desc: null
+  value: 0.8
+schedule_interval:
+  desc: null
+  value: 1000
+opt_decay_schedule:
+  desc: null
+  value: ''
+replay_buffer_size:
+  desc: null
+  value: 1000000
+initial_step:
+  desc: null
+  value: 25000
+n_train_per_step:
+  desc: null
+  value: 1
+max_path_length:
+  desc: null
+  value: 500
+eval_episodes:
+  desc: null
+  value: 1
+eval_interval:
+  desc: null
+  value: 10000
+seed:
+  desc: null
+  value: 1
+eval_seed:
+  desc: null
+  value: 42
+_wandb:
+  desc: null
+  value:
+    python_version: 3.9.20
+    cli_version: 0.17.0
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    start_time: 1764744229
+    t:
+      1:
+      - 12
+      - 45
+      - 55
+      2:
+      - 12
+      - 45
+      - 55
+      3:
+      - 13
+      - 14
+      - 16
+      - 23
+      4: 3.9.20
+      5: 0.17.0
+      8:
+      - 5
+      13: linux-x86_64

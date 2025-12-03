@@ -38,7 +38,7 @@ python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_
 
 MT10 with LoRA
 ```bash
-python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_args domain=metaworld env_name=MT10 activation=tanh n_layer=4 hidden_dim=400 random_goal=True batch_size=100 n_reset=4 critic_layernorm=True critic_init_layernorm=True rank=8 threshold=0.8
+python run_experiments.py --main_module_name train_ars_lora --seeds 1 2 3 4 --config_args domain=metaworld env_name=MT10 activation=tanh n_layer=4 hidden_dim=400 random_goal=True batch_size=100 n_reset=4 critic_layernorm=True critic_init_layernorm=True rank=8 threshold=0.8
 ```
 
 MT50
@@ -48,7 +48,19 @@ python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_
 
 MT50 with LoRA
 ```bash
-python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_args domain=metaworld env_name=MT50 activation=tanh n_layer=4 hidden_dim=400 random_goal=True batch_size=100 replay_buffer_size=500000 n_reset=6 critic_layernorm=True  critic_init_layernorm=True rank=16 threshold=0.65
+python run_experiments.py --main_module_name train_ars_lora --seeds 1 2 3 4 --config_args domain=metaworld env_name=MT50 activation=tanh n_layer=4 hidden_dim=400 random_goal=True batch_size=100 replay_buffer_size=500000 n_reset=6 critic_layernorm=True  critic_init_layernorm=True rank=16 threshold=0.65
+```
+
+Best Performance for MT50 --> Increase the network capacity
+```bash
+python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_args domain=metaworld env_name=MT50 activation=tanh n_layer=4 hidden_dim=1024 random_goal=True batch_size=100 replay_buffer_size=500000 n_reset=6 critic_layernorm=True  critic_init_layernorm=True 
+```
+
+For horizon length 150
+```bash
+python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_args domain=metaworld env_name=MT10 activation=relu n_layer=4 hidden_dim=400 random_goal=True batch_size=100 n_reset=4 critic_layernorm=True  critic_init_layernorm=True max_path_length=150
+
+python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_args domain=metaworld env_name=MT50 activation=tanh n_layer=4 hidden_dim=1024 random_goal=True batch_size=100 replay_buffer_size=200000 n_reset=9 critic_layernorm=True  critic_init_layernorm=True max_path_length=150
 ```
 
 

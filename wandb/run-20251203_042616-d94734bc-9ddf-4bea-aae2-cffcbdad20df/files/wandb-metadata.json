@@ -1,0 +1,209 @@
+{
+    "os": "Linux-6.11.0-25-generic-x86_64-with-glibc2.39",
+    "python": "3.9.20",
+    "heartbeatAt": "2025-12-02T19:26:18.397202",
+    "startedAt": "2025-12-02T19:26:16.682480",
+    "docker": null,
+    "cuda": null,
+    "args": [
+        "--main_module_name",
+        "train_ars",
+        "--seeds",
+        "1",
+        "2",
+        "3",
+        "4",
+        "--config_args",
+        "domain=metaworld",
+        "env_name=MT10",
+        "activation=tanh",
+        "n_layer=4",
+        "hidden_dim=400",
+        "random_goal=True",
+        "batch_size=100",
+        "n_reset=4",
+        "critic_layernorm=True",
+        "critic_init_layernorm=True",
+        "rank=8",
+        "threshold=0.8"
+    ],
+    "state": "running",
+    "program": "/home/wisrl/mscho/ARS-MTRL/run_experiments.py",
+    "codePathLocal": "run_experiments.py",
+    "codePath": "run_experiments.py",
+    "git": {
+        "remote": "https://github.com/ms-cho/ARS-MTRL.git",
+        "commit": "314a9b1978408396825011596431a18db8c77eba"
+    },
+    "email": "ms.cho@kaist.ac.kr",
+    "root": "/home/wisrl/mscho/ARS-MTRL",
+    "host": "wisrl",
+    "username": "wisrl",
+    "executable": "/home/wisrl/anaconda3/envs/jaxm/bin/python",
+    "cpu_count": 20,
+    "cpu_count_logical": 28,
+    "cpu_freq": {
+        "current": 2711.0719285714285,
+        "min": 800.0,
+        "max": 5000.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 4965.845,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 800.0,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 1666.582,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 800.0,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 5500.0,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 800.0,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 5270.449,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 800.0,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 800.0,
+            "min": 800.0,
+            "max": 5600.0
+        },
+        {
+            "current": 800.0,
+            "min": 800.0,
+            "max": 5600.0
+        },
+        {
+            "current": 4734.449,
+            "min": 800.0,
+            "max": 5600.0
+        },
+        {
+            "current": 800.0,
+            "min": 800.0,
+            "max": 5600.0
+        },
+        {
+            "current": 5500.0,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 800.0,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 800.0,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 800.0,
+            "min": 800.0,
+            "max": 5500.0
+        },
+        {
+            "current": 800.0,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 4300.212,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 4396.59,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 800.0,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 4317.763,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 4300.002,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 4240.625,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 4308.333,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 4299.295,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 800.0,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 4312.79,
+            "min": 800.0,
+            "max": 4300.0
+        },
+        {
+            "current": 4300.316,
+            "min": 800.0,
+            "max": 4300.0
+        }
+    ],
+    "disk": {
+        "/": {
+            "total": 456.34544372558594,
+            "used": 372.89318466186523
+        }
+    },
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA GeForce RTX 4090",
+            "memory_total": 25757220864
+        }
+    ],
+    "memory": {
+        "total": 61.314571380615234
+    }
+}
