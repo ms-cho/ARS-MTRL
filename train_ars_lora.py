@@ -192,6 +192,7 @@ def main(config: Config):
     )
 
     eval_returns = []
+    eval_success = np.zeros(n_envs)
     observations, dones = env.reset(), False
     rew_scale = np.ones((n_envs, 1))
     success = np.zeros(n_envs)
