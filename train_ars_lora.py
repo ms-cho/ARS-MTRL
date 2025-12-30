@@ -11,13 +11,10 @@ import wandb
 from dataclasses import dataclass, asdict
 
 import wrappers
-from evaluation import (
-    evaluate_n_envs,
-    evaluates,
-)
 from learner_sac_mt_lora import Learner
 import metaworld
 from dataset_utils import MultiTaskReplayBuffer
+import utils
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
@@ -208,15 +205,7 @@ def main(config: Config):
                     np.max(mean_rews) / np.maximum(mean_rews, 0.01), (n_envs, 1)
                 )
 
-                wandb.log(
-                    {
-                        "time step": i,
-                        **{
-                            f"{env_name}/training/rew_scale": np.mean(rew_scale[env_id])
-                            for env_id, env_name in enumerate(env_names)
-                        },
-                    }
-                )
+                utils.log_rew_scale(i, rew_scale, env_names)
                 agent = Learner(
                     observations=env.observation_space.sample()[np.newaxis],
                     actions=env.action_space.sample()[np.newaxis],
@@ -249,37 +238,7 @@ def main(config: Config):
         if all(dones):
             observations, dones = env.reset(), False
             if i % config.log_interval:
-                wandb.log(
-                    {
-                        "time step": i,
-                        f"{config.env_name}/training/average_successs": np.mean(
-                            success > 0
-                        ),
-                    }
-                )
-                for env_id, info in enumerate(infos):
-                    for key, val in info.items():
-                        if key == "episode":
-                            val.pop("length")
-                            val.pop("duration")
-                            wandb.log(
-                                {
-                                    "time step": i,
-                                    **{
-                                        f"{env_names[env_id]}/training/average_{k}s": v
-                                        for k, v in val.items()
-                                    },
-                                }
-                            )
-                        elif key == "success":
-                            wandb.log(
-                                {
-                                    "time step": i,
-                                    f"{env_names[env_id]}/training/average_success": int(
-                                        success[env_id] > 0
-                                    ),
-                                }
-                            )
+                utils.log_episode_info(i, infos, env_names, config.env_name, success)
 
             success = np.zeros(n_envs)
 
@@ -289,56 +248,19 @@ def main(config: Config):
                 update_info = agent.update(batch)
 
             if i % config.log_interval == 0:
-                for k, v in update_info.items():
-                    if v.ndim == 0:
-                        wandb.log({"time step": i, f"training/{k}": v})
-                    else:
-                        wandb.log(
-                            {
-                                f"time step": i,
-                                **{
-                                    f"{env_name}/training/{k}": vv
-                                    for env_name, vv in zip(env_names, v)
-                                },
-                            }
-                        )
+                utils.log_update_metrics(i, update_info, env_names)
 
         if i % config.eval_interval == 0 and i > config.initial_step:
-            eval_stats = evaluates(
-                eval_f=evaluate_n_envs,
-                agent=agent,
-                env=eval_env,
-                num_episodes=config.eval_episodes,
-                n_envs=n_envs,
-                distribution="stc",
+            eval_returns_, eval_success = utils.run_eval(
+                i,
+                agent,
+                eval_env,
+                config.eval_episodes,
+                n_envs,
+                env_names,
+                config.env_name,
             )
-            eval_returns_ = [eval_stat["return"] for eval_stat in eval_stats]
-            if "success" in eval_stats[0].keys():
-                eval_success = [eval_stat["success"] for eval_stat in eval_stats]
-            else:
-                eval_success = [0 for _ in range(n_envs)]
             eval_returns.append((i, *eval_returns_))
-            prefix = "evaluation"
-
-            wandb.log(
-                {
-                    "time step": i,
-                    f"{config.env_name}/{prefix}/average_successs": np.mean(
-                        eval_success
-                    ),
-                }
-            )
-            for env_name, eval_stat in zip(env_names, eval_stats):
-                wandb.log(
-                    {
-                        "time step": i,
-                        **{
-                            f"{env_name}/{prefix}/average_{k}s": v
-                            for k, v in eval_stat.items()
-                            if "length" not in k
-                        },
-                    }
-                )
 
         if i % reset_interval == 0 and i > config.batch_size:
             if not agent.use_lora:
@@ -347,15 +269,7 @@ def main(config: Config):
             rew_scale = np.reshape(
                 np.max(mean_rews) / np.maximum(mean_rews, 0.01), (n_envs, 1)
             )
-            wandb.log(
-                {
-                    "time step": i,
-                    **{
-                        f"{env_name}/training/rew_scale": np.mean(rew_scale[env_id])
-                        for env_id, env_name in enumerate(env_names)
-                    },
-                }
-            )
+            utils.log_rew_scale(i, rew_scale, env_names)
             if (
                 np.mean(eval_success) < config.threshold and not agent.use_lora
             ) or i <= config.max_steps * 0.75:
