@@ -25,6 +25,7 @@ class Config:
     project: str = "MTRL"
     group: str = ""
     name: str = ""
+    use_ars: bool = True
     # model params
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
@@ -66,13 +67,20 @@ class Config:
             r_interval = int(reset_interval / 1e5)
         else:
             r_interval = reset_interval / 1e5
-        alg_name = "ARS"
+
+        if self.use_ars:
+            alg_name = "ARS"
+        else:
+            alg_name = "SAC-MT"
         if self.critic_layernorm and self.critic_init_layernorm:
             alg_name += "-LN-ILN"
         elif self.critic_layernorm:
             alg_name += "-LN"
 
-        self.name = f"{alg_name}-NReset{self.n_reset}-Interval{r_interval}e5"
+        if self.use_ars:
+            self.name = f"{alg_name}-NReset{self.n_reset}-Interval{r_interval}e5"
+        else:
+            self.name = f"{alg_name}"
 
 
 def make_benchmark(
@@ -142,15 +150,7 @@ def make_eval_benchmark(
     return envs
 
 
-def main(config: Config):
-    wandb.init(
-        config=asdict(config),
-        project=config.project,
-        group=config.group,
-        name=config.name,
-        id=str(uuid.uuid4()),
-    )
-
+def setup_envs(config: Config):
     envs, env_names, tasks = make_benchmark(
         config.domain, config.env_name, config.seed, config.max_path_length
     )
@@ -171,11 +171,23 @@ def main(config: Config):
     )
     eval_env = wrappers.MultiParallelEnvExecutor(eval_envs, 10, eval_tasks)
 
+    return env, eval_env, env_names, action_dim, n_envs
+
+
+def main(config: Config):
+    wandb.init(
+        config=asdict(config),
+        project=config.project,
+        group=config.group,
+        name=config.name,
+        id=str(uuid.uuid4()),
+    )
+
+    env, eval_env, env_names, action_dim, n_envs = setup_envs(config)
+
     kwargs_ = asdict(config)
     kwargs_["hidden_dims"] = tuple([config.hidden_dim for _ in range(config.n_layer)])
     learner_args = inspect.signature(Learner).parameters.keys()
-
-    # Filter config to only include arguments that Learner accepts
     kwargs = {k: v for k, v in kwargs_.items() if k in learner_args}
     agent = None
 
@@ -187,21 +199,26 @@ def main(config: Config):
     )
 
     observations, dones = env.reset(), False
-    rew_scale = np.ones((n_envs, 1))
+    rew_scale = np.ones((n_envs, 1)) if config.use_ars else None
     success = np.zeros(n_envs)
+    reset_interval = (
+        math.ceil(config.max_steps / (1000 * (config.n_reset + 1))) * 1000
+        if config.use_ars
+        else None
+    )
 
-    reset_interval = math.ceil(config.max_steps / (1000 * (config.n_reset + 1))) * 1000
     for i in tqdm.tqdm(range(1, config.max_steps + 1), smoothing=0.1, disable=False):
         if i > config.initial_step:
             if agent is None:
-                mean_rews = np.mean(
-                    replay_buffer.rewards[:, : replay_buffer.size], axis=-1
-                )
-                rew_scale = np.reshape(
-                    np.max(mean_rews) / np.maximum(mean_rews, 0.01), (n_envs, 1)
-                )
+                if config.use_ars:
+                    mean_rews = np.mean(
+                        replay_buffer.rewards[:, : replay_buffer.size], axis=-1
+                    )
+                    rew_scale = np.reshape(
+                        np.max(mean_rews) / np.maximum(mean_rews, 0.01), (n_envs, 1)
+                    )
+                    utils.log_rew_scale(i, rew_scale, env_names)
 
-                utils.log_rew_scale(i, rew_scale, env_names)
                 agent = Learner(
                     observations=env.observation_space.sample()[np.newaxis],
                     actions=env.action_space.sample()[np.newaxis],
@@ -238,8 +255,9 @@ def main(config: Config):
             success = np.zeros(n_envs)
 
         if i > config.batch_size and i > config.initial_step:
+            sample_kwargs = {"rew_scale": rew_scale} if config.use_ars else {}
             for _ in range(config.n_train_per_step):
-                batch = replay_buffer.sample(config.batch_size, rew_scale=rew_scale)
+                batch = replay_buffer.sample(config.batch_size, **sample_kwargs)
                 update_info = agent.update(batch)
 
             if i % config.log_interval == 0:
@@ -256,7 +274,7 @@ def main(config: Config):
                 config.env_name,
             )
 
-        if i % reset_interval == 0 and i > config.batch_size:
+        if config.use_ars and i % reset_interval == 0 and i > config.batch_size:
             mean_rews = np.mean(replay_buffer.rewards[:, : replay_buffer.size], axis=-1)
             rew_scale = np.reshape(
                 np.max(mean_rews) / np.maximum(mean_rews, 0.01), (n_envs, 1)
