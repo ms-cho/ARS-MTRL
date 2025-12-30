@@ -2,7 +2,6 @@ import os
 import inspect
 
 import uuid
-import gym
 import numpy as np
 import tqdm
 import math
@@ -10,9 +9,7 @@ import pyrallis
 import wandb
 from dataclasses import dataclass, asdict
 
-import wrappers
 from learner_sac_mt import Learner
-import metaworld
 from dataset_utils import MultiTaskReplayBuffer
 import utils
 
@@ -83,93 +80,26 @@ class Config:
             self.name = f"{alg_name}"
 
 
-def make_benchmark(
-    domain: str, benchmark_name: str, seed: int, max_path_length: int = 500
-) -> gym.Env:
-    try:
-        benchmark_class = getattr(metaworld, benchmark_name)
-        benchmark = benchmark_class(seed=seed)
-    except TypeError:
-        benchmark = benchmark_class()
-    except AttributeError:
-        raise NotImplementedError(f"{benchmark_name} is not implemented in {domain}.")
-
-    envs = []
-    tasks_per_env = {}
-    tasks = benchmark.train_tasks
-    env_names = list(benchmark.train_classes.keys())
-
-    for env_id, env_cls in enumerate(benchmark.train_classes.values()):
-        env = env_cls()
-        env.set_task(tasks[env_id * 50])
-        env._freeze_rand_vec = False
-
-        env = wrappers.EpisodeMonitor(env)
-
-        env.seed(seed + env_id + 1)
-        env.action_space.seed(seed + env_id + 1)
-        env.observation_space.seed(seed + env_id + 1)
-
-        env.max_path_length = max_path_length
-
-        envs.append(env)
-
-        tasks_per_env[env_names[env_id]] = tasks[env_id * 50 : (env_id + 1) * 50]
-
-    return envs, env_names, tasks_per_env
-
-
-def make_eval_benchmark(
-    domain: str, benchmark_name: str, seed: int, tasks, max_path_length: int = 500
-) -> gym.Env:
-    try:
-        benchmark_class = getattr(metaworld, benchmark_name)
-        benchmark = benchmark_class(seed=seed)
-    except TypeError:
-        benchmark = benchmark_class()
-    except AttributeError:
-        raise NotImplementedError(f"{benchmark_name} is not implemented in {domain}.")
-
-    envs = []
-    env_names = list(benchmark.train_classes.keys())
-
-    for env_id, env_cls in enumerate(benchmark.train_classes.values()):
-        env = env_cls()
-        env.set_task(tasks[env_names[env_id]][0])
-
-        env = wrappers.EpisodeMonitor(env)
-
-        env.seed(seed + env_id + 1)
-        env.action_space.seed(seed + env_id + 1)
-        env.observation_space.seed(seed + env_id + 1)
-
-        env.max_path_length = max_path_length
-
-        envs.append(env)
-
-    return envs
-
-
 def setup_envs(config: Config):
-    envs, env_names, tasks = make_benchmark(
+    envs, env_names, tasks = utils.make_benchmark(
         config.domain, config.env_name, config.seed, config.max_path_length
     )
     env_names = list(env_names)
-    env = wrappers.MultiParallelEnvExecutor(envs)
+    env = utils.wrappers.MultiParallelEnvExecutor(envs)
     action_dim = env.action_space.shape[0]
     n_envs = env.n_envs
 
     eval_tasks = {
         env_name: tasks_per_env[:10] for env_name, tasks_per_env in tasks.items()
     }
-    eval_envs = make_eval_benchmark(
+    eval_envs = utils.make_eval_benchmark(
         config.domain,
         config.env_name,
         config.eval_seed,
         eval_tasks,
         config.max_path_length,
     )
-    eval_env = wrappers.MultiParallelEnvExecutor(eval_envs, 10, eval_tasks)
+    eval_env = utils.wrappers.MultiParallelEnvExecutor(eval_envs, 10, eval_tasks)
 
     return env, eval_env, env_names, action_dim, n_envs
 
