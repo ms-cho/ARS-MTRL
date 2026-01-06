@@ -11,6 +11,7 @@ import jax.numpy as jnp
 import optax
 from flax.training import checkpoints
 from flax.training import dynamic_scale as dynamic_scale_lib
+from jax.flatten_util import ravel_pytree
 
 Batch = collections.namedtuple(
     "Batch", ["observations", "actions", "rewards", "masks", "next_observations"]
@@ -133,6 +134,46 @@ def extract_ln_params(params):
         if "LayerNorm_" in k:
             ln_dict[k] = {"scale": v["scale"], "bias": v["bias"]}
     return ln_dict
+
+
+def flatten_taskwise_gradients(grads_pytree, n_task):
+    """
+    grads_pytree: a PyTree where each leaf has shape (n_task, ...)
+    """
+    # We'll 'ravel' just once on an example slice to get unravel_fn
+    example_grad = jax.tree_util.tree_map(lambda x: x[0], grads_pytree)
+    flat_example_grad, unravel_fn = ravel_pytree(example_grad)
+
+    def slice_and_flatten(i):
+        g_i = jax.tree_util.tree_map(lambda x: x[i], grads_pytree)
+        g_i_flat, _ = ravel_pytree(g_i)
+        return g_i_flat
+
+    # vmap over 0..n_task
+    grads_flat = jax.vmap(slice_and_flatten)(jnp.arange(n_task))
+    return grads_flat, unravel_fn
+
+
+@functools.partial(jax.jit)
+def project_single_grad(grad_i, all_grads):
+    """
+    The typical PCGrad projection:
+      for each grad g_k in all_grads, if dot(grad_i, g_k) < 0,
+         subtract the projection of grad_i onto g_k from grad_i
+    """
+
+    @functools.partial(jax.jit)
+    def body_fun(carry, g_k):
+        dot_ik = jnp.dot(carry, g_k)
+        proj_coeff = dot_ik / (jnp.dot(g_k, g_k) + 1e-9)
+        # Only subtract if dot < 0
+        carry = carry - jnp.minimum(proj_coeff, 0.0) * g_k
+        return carry, proj_coeff
+
+    final_grad, proj_coeffs = jax.lax.scan(body_fun, grad_i, all_grads)
+    # (Optional) track how many negative dot products we encountered
+    # or just skip it if you don't need that stat
+    return final_grad, (proj_coeffs < 0).sum()  # or other info if desired
 
 
 def default_init(scale: Optional[float] = jnp.sqrt(2)):
@@ -267,6 +308,165 @@ class LoRAMulti_MLP(nn.Module):
         return x
 
 
+class ModularGatedNet(nn.Module):
+    output_shape: int
+    base_hidden_shapes: Sequence[int]
+    em_hidden_shapes: Sequence[int]
+
+    # The repeated layers / modules config:
+    num_layers: int
+    num_modules: int
+    module_hidden: int
+
+    # Gating config:
+    gating_hidden: int
+    num_gating_layers: int
+
+    # Activations and inits:
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    kernel_init: Callable = default_init()
+
+    @nn.compact
+    def __call__(
+        self,
+        x: jnp.ndarray,
+        embedding_input: jnp.ndarray,
+        training: bool = False,
+        return_weights: bool = False,
+    ):
+        # 1) base & em_base
+        base_out = MLP(
+            hidden_dims=self.base_hidden_shapes,
+            activations=self.activations,
+            activate_final=False,
+        )(x, training=training)
+
+        embedding = MLP(
+            hidden_dims=self.em_hidden_shapes,
+            activations=self.activations,
+            activate_final=False,
+        )(embedding_input, training=training)
+
+        embedding = embedding * base_out
+
+        out = self.activations(base_out)
+
+        # 2) Gating MLP ("gating_fcs"): replicate your gating_fcs
+        g = MLP(
+            hidden_dims=[self.gating_hidden for _ in range(self.num_gating_layers)],
+            activations=self.activations,
+            activate_final=False,
+        )(self.activations(embedding), training=training)
+
+        # 3) gating_weight_fc_0 -> produce raw_weight for first layer with shape = (..., num_modules, num_modules)
+        raw_weight = nn.Dense(
+            features=self.num_modules * self.num_modules,
+            kernel_init=self.kernel_init,
+            name=f"gating_weight_cond_fc_0",
+        )(self.activations(g))
+
+        weights_list = []
+        flatten_weights_list = []
+
+        # shape = (..., num_modules, num_modules)
+        shape_2d = raw_weight.shape[:-1] + (self.num_modules, self.num_modules)
+        raw_weight = raw_weight.reshape(shape_2d)
+        softmax_weight = nn.softmax(raw_weight, axis=-1)
+
+        weights_list.append(softmax_weight)
+        flatten_weights_list.append(
+            softmax_weight.reshape(softmax_weight.shape[:-2] + (-1,))
+        )
+
+        # 4) Additional gating layers for layers (2,...,):
+        for layer_idx in range(self.num_layers - 2):
+            cond_fc = nn.Dense(
+                features=self.gating_hidden,
+                kernel_init=self.kernel_init,
+                name=f"gating_weight_cond_fc_{layer_idx+1}",
+            )
+            # gating_weight_fc_(layer_idx+1):
+            weight_fc = nn.Dense(
+                features=self.num_modules * self.num_modules,
+                kernel_init=self.kernel_init,
+                name=f"gating_weight_fc_{layer_idx+1}",
+            )
+
+            concat_flat = jnp.concatenate(flatten_weights_list, axis=-1)
+
+            cond_val = cond_fc(concat_flat)
+            cond_val = cond_val * g
+            cond_val = self.activations(cond_val)
+
+            raw_w = weight_fc(cond_val)
+            raw_w = raw_w.reshape(shape_2d)
+            w = nn.softmax(raw_w, axis=-1)
+
+            weights_list.append(w)
+            flatten_weights_list.append(w.reshape(w.shape[:-2] + (-1,)))
+
+        # 5) gating_weight_cond_last -> gating_weight_last => num_modules
+        gw_cond_last = nn.Dense(
+            features=self.gating_hidden,
+            kernel_init=self.kernel_init,
+            name="gating_weight_cond_last",
+        )
+        gw_last = nn.Dense(
+            features=self.num_modules,
+            kernel_init=self.kernel_init,
+            name="gating_weight_last",
+        )
+
+        concat_flat = jnp.concatenate(flatten_weights_list, axis=-1)
+
+        cond_val = gw_cond_last(concat_flat)
+        cond_val = cond_val * g
+        cond_val = self.activations(cond_val)
+
+        raw_last_weight = gw_last(cond_val)  # shape (..., num_modules)
+        last_weight = nn.softmax(raw_last_weight, axis=-1)
+
+        # 6) Build the actual "layer modules"
+        module_outputs = []
+        for j in range(self.num_modules):
+            out_j = nn.Dense(
+                features=self.module_hidden,
+                kernel_init=self.kernel_init,
+                name=f"module_0_{j}",
+            )(out)
+            module_outputs.append(out_j[..., None, :])  # unsqueeze dim -2
+
+        module_outputs = jnp.concatenate(module_outputs, axis=-2)
+
+        for i in range(1, self.num_layers):
+            new_module_outputs = []
+            w_i = weights_list[i - 1]
+            for j in range(self.num_modules):
+                # Weighted sum across the "module_outputs"
+                w_j = w_i[..., j, :][..., None]  # (..., num_modules, 1)
+                module_input_j = (module_outputs * w_j).sum(axis=-2)
+
+                module_input_j = self.activations(module_input_j)
+                out_ij = nn.Dense(
+                    features=self.module_hidden,
+                    kernel_init=self.kernel_init,
+                    name=f"module_{i}_{j}",
+                )(module_input_j)
+                new_module_outputs.append(out_ij[..., None, :])
+            module_outputs = jnp.concatenate(new_module_outputs, axis=-2)
+
+        out = (module_outputs * last_weight[..., None]).sum(axis=-2)
+        out = self.activations(out)
+
+        # Final linear
+        final_dense = nn.Dense(features=self.output_shape, kernel_init=self.kernel_init)
+        out = final_dense(out)
+
+        if return_weights:
+            return out, weights_list, last_weight
+        return out
+
+
 @flax.struct.dataclass
 class Model:
     step: int
@@ -274,7 +474,6 @@ class Model:
     params: Params
     tx: Optional[optax.GradientTransformation] = flax.struct.field(pytree_node=False)
     opt_state: Optional[optax.OptState] = None
-    dynamic_scale: Optional[dynamic_scale_lib.DynamicScale] = None
 
     @classmethod
     def create(
@@ -282,7 +481,6 @@ class Model:
         model_def: nn.Module,
         inputs: Sequence[jnp.ndarray],
         tx: Optional[optax.GradientTransformation] = None,
-        dynamic_scale: Optional[dynamic_scale_lib.DynamicScale] = None,
     ) -> "Model":
         variables = model_def.init(*inputs)
         params = variables.pop("params")
@@ -293,7 +491,6 @@ class Model:
             params=params,
             tx=tx,
             opt_state=opt_state,
-            dynamic_scale=dynamic_scale,
         )
 
     def __call__(self, *args, **kwargs):
@@ -303,43 +500,17 @@ class Model:
         return self.apply_fn.apply(*args, **kwargs)
 
     def apply_gradient(self, loss_fn) -> Tuple[Any, "Model"]:
-        if self.dynamic_scale:
-            grad_fn = self.dynamic_scale.value_and_grad(loss_fn, has_aux=True)
-            dynamic_scale, is_fin, aux, grads = grad_fn(self.params)
-            info = aux[1]
+        grad_fn = jax.grad(loss_fn, has_aux=True)
+        grads, info = grad_fn(self.params)
 
-            updates, new_opt_state = self.tx.update(grads, self.opt_state, self.params)
-
-            new_params = optax.apply_updates(self.params, updates)
-            return (
-                self.replace(
-                    step=self.step + 1,
-                    params=jax.tree_util.tree_map(
-                        functools.partial(jnp.where, is_fin), new_params, self.params
-                    ),
-                    opt_state=jax.tree_util.tree_map(
-                        functools.partial(jnp.where, is_fin),
-                        new_opt_state,
-                        self.opt_state,
-                    ),
-                    dynamic_scale=dynamic_scale,
-                ),
-                info,
-            )
-        else:
-            grad_fn = jax.grad(loss_fn, has_aux=True)
-            grads, info = grad_fn(self.params)
-
-            updates, new_opt_state = self.tx.update(grads, self.opt_state, self.params)
-            info.update({"grad/{}".format(self.apply_fn.name): grads})
-            new_params = optax.apply_updates(self.params, updates)
-
-            return (
-                self.replace(
-                    step=self.step + 1, params=new_params, opt_state=new_opt_state
-                ),
-                info,
-            )
+        updates, new_opt_state = self.tx.update(grads, self.opt_state, self.params)
+        new_params = optax.apply_updates(self.params, updates)
+        return (
+            self.replace(
+                step=self.step + 1, params=new_params, opt_state=new_opt_state
+            ),
+            info,
+        )
 
     def save(self, save_path: str):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -350,9 +521,6 @@ class Model:
         with open(load_path, "rb") as f:
             params = flax.serialization.from_bytes(self.params, f.read())
         return self.replace(params=params)
-
-    def compute_gradient(self, loss_fn) -> Any:
-        return jax.grad(loss_fn, has_aux=True)(self.params)
 
 
 @flax.struct.dataclass
@@ -412,3 +580,82 @@ class MultiModel:
         with open(load_path, "rb") as f:
             params = flax.serialization.from_bytes(self.params, f.read())
         return self.replace(params=params)
+
+
+@flax.struct.dataclass
+class MultiModelPCGrad:
+    step: int
+    n_task: int
+    rng: jax.random.PRNGKey
+    apply_fn: nn.Module = flax.struct.field(pytree_node=False)
+    params: Params
+    tx: Optional[optax.GradientTransformation] = flax.struct.field(pytree_node=False)
+    opt_state: Optional[optax.OptState] = None
+
+    @classmethod
+    def create(
+        cls,
+        model_def: nn.Module,
+        inputs: Sequence[jnp.ndarray],
+        tx: Optional[optax.GradientTransformation] = None,
+        n_task: int = 1,
+        rng: Optional[jax.random.PRNGKey] = None,
+    ) -> "Model":
+        variables = model_def.init(*inputs)
+        params = variables.pop("params")
+        opt_state = tx.init(params) if tx else None
+        return cls(
+            step=1,
+            apply_fn=model_def,
+            params=params,
+            tx=tx,
+            opt_state=opt_state,
+            n_task=n_task,
+            rng=rng,
+        )
+
+    def __call__(self, *args, **kwargs):
+        return self.apply_fn.apply({"params": self.params}, *args, **kwargs)
+
+    def apply(self, *args, **kwargs):
+        return self.apply_fn.apply(*args, **kwargs)
+
+    def apply_gradient(self, loss_fn, n_task: int = 50) -> Tuple[Any, "Model"]:
+        jacobian_fn = jax.jacrev(loss_fn, has_aux=True)
+        grads_per_task, info = jacobian_fn(self.params)
+        # grads = jax.tree_util.tree_map(lambda g: jnp.mean(g, axis=0), jacobian)
+
+        # ---------- PCGrad Projection Step -----------
+        key, new_rng = jax.random.split(self.rng)
+        shuffle_perm = jax.random.permutation(key, n_task)
+        grads_per_task = jax.tree_util.tree_map(
+            lambda x: jnp.take(x, shuffle_perm, axis=0), grads_per_task
+        )
+
+        # Flatten all tasks’ grads once
+        grads_per_task_flat, unravel_fn = flatten_taskwise_gradients(
+            grads_per_task, n_task
+        )  # (n_task, dim)
+
+        # Project each grad_i in grads_per_task_flat against the others
+        proj_grads_flat, n_projections = jax.vmap(
+            project_single_grad, in_axes=(0, None)
+        )(grads_per_task_flat, grads_per_task_flat)
+
+        # -----------------------------------------------------
+        # Combine the projected gradients, e.g. average across tasks
+        final_flat_grad = jnp.mean(proj_grads_flat, axis=0)
+        final_grad = unravel_fn(final_flat_grad)
+
+        updates, new_opt_state = self.tx.update(final_grad, self.opt_state, self.params)
+        new_params = optax.apply_updates(self.params, updates)
+
+        return (
+            self.replace(
+                step=self.step + 1,
+                params=new_params,
+                opt_state=new_opt_state,
+                rng=new_rng,
+            ),
+            info,
+        )

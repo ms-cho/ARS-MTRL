@@ -9,7 +9,7 @@ import pyrallis
 import wandb
 from dataclasses import dataclass, asdict
 
-from learner_sac_mt import Learner
+from learner_softmodular import Learner
 from dataset_utils import MultiTaskReplayBuffer
 import utils
 
@@ -25,18 +25,20 @@ class Config:
     # model params
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
-    value_lr: float = 3e-4
-    hidden_dim: int = 400
-    n_layer: int = 4
+    base_hidden_dim: int = 400
+    num_base_layers: int = 2
+    em_hidden_dim: int = 400
+    num_em_layers: int = 1
+    num_layers: int = 2
+    num_modules: int = 2
+    module_hidden: int = 256
+    gating_hidden: int = 256
+    num_gating_layers: int = 2
     discount: float = 0.99
     tau: float = 5e-3
     n_critic: int = 2
-    critic_layernorm: bool = False
-    critic_init_layernorm: bool = False
     dropout_rate: float = -1.0  # -1.0 means no dropout
     activation: str = "tanh"
-    multi_head: bool = False
-    use_pcgrad: bool = False
     # training params
     use_ars: bool = True
     batch_size: int = 100
@@ -65,16 +67,7 @@ class Config:
         else:
             r_interval = reset_interval / 1e5
 
-        if self.use_ars:
-            alg_name = "ARS(SAC-MT-MH)" if self.multi_head else "ARS(SAC-MT)"
-        else:
-            alg_name = "SAC-MT-MH" if self.multi_head else "SAC-MT"
-        if self.use_pcgrad:
-            alg_name += "-PCGrad"
-        if self.critic_layernorm and self.critic_init_layernorm:
-            alg_name += "-LN-ILN"
-        elif self.critic_layernorm:
-            alg_name += "-LN"
+        alg_name = "ARS(SoftModule)" if self.use_ars else "SoftModule"
 
         self.name = (
             f"{alg_name}-NReset{self.n_reset}-Interval{r_interval}e5"
@@ -118,8 +111,13 @@ def main(config: Config):
 
     env, eval_env, env_names, action_dim, n_envs = setup_envs(config)
     kwargs_ = asdict(config)
-    kwargs_["hidden_dims"] = tuple([config.hidden_dim for _ in range(config.n_layer)])
-    kwargs_["multi_head"] = config.multi_head
+    kwargs_["base_hidden_dims"] = tuple(
+        [config.base_hidden_dim for _ in range(config.num_base_layers)]
+    )
+    kwargs_["em_hidden_dims"] = tuple(
+        [config.base_hidden_dim for _ in range(config.num_em_layers)]
+    )
+
     learner_args = inspect.signature(Learner).parameters.keys()
     kwargs = {k: v for k, v in kwargs_.items() if k in learner_args}
     agent = None

@@ -7,6 +7,7 @@ from common import (
     MultiModel,
     LoRAMultiDense,
     LoRAMulti_MLP,
+    ModularGatedNet,
 )
 import functools
 from typing import Optional, Sequence, Tuple, Callable, Dict
@@ -180,6 +181,92 @@ class NormalTanhMulitHeadPolicy(nn.Module):
         means = means[task_indices, :, task_indices, :]
         log_stds = log_stds[task_indices, :, task_indices, :]
         scale = scale[task_indices, :, task_indices, :]
+
+        if not self.tanh_squash_distribution:
+            means = nn.tanh(means)
+
+        base_dist = tfd.MultivariateNormalDiag(
+            loc=means, scale_diag=scale * temperature
+        )
+
+        if self.tanh_squash_distribution:
+            if deterministic:
+                if with_logstd:
+                    return means, log_stds
+                else:
+                    return nn.tanh(means)
+            else:
+                dist = tfd.TransformedDistribution(
+                    distribution=base_dist, bijector=tfb.Tanh()
+                )
+                if with_logstd:
+                    return dist, log_stds
+                else:
+                    return dist
+        else:
+            if deterministic:
+                if with_logstd:
+                    return means, log_stds
+                else:
+                    return means
+            else:
+                if with_logstd:
+                    return base_dist, log_stds
+                else:
+                    return base_dist
+
+
+class NormalTanhModularGatedPolicy(nn.Module):
+    base_hidden_dims: Sequence[int]
+    em_hidden_dims: Sequence[int]
+    num_layers: int
+    num_modules: int
+    module_hidden: int
+    gating_hidden: int
+    num_gating_layers: int
+    action_dim: int
+    n_task: int
+    state_dependent_std: bool = True
+    dropout_rate: Optional[float] = -1
+    log_std_scale: float = 1.0
+    log_std_min: Optional[float] = None
+    log_std_max: Optional[float] = None
+    tanh_squash_distribution: bool = True
+    softplus: bool = True
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    name: str = "actor"
+
+    @nn.compact
+    def __call__(
+        self,
+        observations: jnp.ndarray,
+        temperature: float = 1.0,
+        training: bool = False,
+        with_logstd: bool = False,
+        deterministic: bool = False,
+    ) -> tfd.Distribution:
+        outputs = ModularGatedNet(
+            self.action_dim * 2,
+            self.base_hidden_dims,
+            self.em_hidden_dims,
+            self.num_layers,
+            self.num_modules,
+            self.module_hidden,
+            self.gating_hidden,
+            self.num_gating_layers,
+            activations=self.activations,
+        )(
+            observations[..., : -self.n_task],
+            observations[..., -self.n_task :],
+            training=training,
+        )
+
+        means, log_stds = jnp.split(outputs, 2, axis=-1)
+
+        log_std_min = self.log_std_min or LOG_STD_MIN
+        log_std_max = self.log_std_max or LOG_STD_MAX
+        log_stds = jnp.clip(log_stds, log_std_min, log_std_max)
+        scale = jnp.exp(log_stds)
 
         if not self.tanh_squash_distribution:
             means = nn.tanh(means)

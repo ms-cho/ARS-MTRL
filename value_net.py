@@ -3,7 +3,7 @@ from typing import Callable, Sequence, Optional, Dict
 import jax.numpy as jnp
 from flax import linen as nn
 
-from common import MLP, Dtype, LoRAMulti_MLP
+from common import MLP, Dtype, LoRAMulti_MLP, ModularGatedNet
 
 
 class Critic(nn.Module):
@@ -130,6 +130,73 @@ class EnsembleLoRACritic(nn.Module):
             dropout_rate=self.dropout_rate,
         )(self.base_params, observations, actions)
         q_values = q_values / jnp.reshape(self.scale, (1, self.n_task, 1))
+        return q_values
+
+
+class ModularGatedCritic(nn.Module):
+    base_hidden_dims: Sequence[int]
+    em_hidden_dims: Sequence[int]
+    num_layers: int
+    num_modules: int
+    module_hidden: int
+    gating_hidden: int
+    num_gating_layers: int
+    n_task: int
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+
+    @nn.compact
+    def __call__(self, observations: jnp.ndarray, actions: jnp.ndarray) -> jnp.ndarray:
+        inputs = jnp.concatenate([observations[..., : -self.n_task], actions], -1)
+        critic = ModularGatedNet(
+            1,
+            self.base_hidden_dims,
+            self.em_hidden_dims,
+            self.num_layers,
+            self.num_modules,
+            self.module_hidden,
+            self.gating_hidden,
+            self.num_gating_layers,
+            activations=self.activations,
+        )(inputs, observations[..., -self.n_task :])
+
+        return jnp.squeeze(critic, -1)
+
+
+class EnsembleModularGatedCritic(nn.Module):
+    base_hidden_dims: Sequence[int]
+    em_hidden_dims: Sequence[int]
+    num_layers: int
+    num_modules: int
+    module_hidden: int
+    gating_hidden: int
+    num_gating_layers: int
+    n_task: int
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    n_ensemble: int = 2
+    name: str = "critic"
+
+    @nn.compact
+    def __call__(self, observations: jnp.ndarray, actions: jnp.ndarray) -> jnp.ndarray:
+        ensemble = nn.vmap(
+            target=ModularGatedCritic,
+            in_axes=None,
+            out_axes=0,
+            variable_axes={"params": 0},
+            split_rngs={"params": True},
+            axis_size=self.n_ensemble,
+        )
+
+        q_values = ensemble(
+            self.base_hidden_dims,
+            self.em_hidden_dims,
+            self.num_layers,
+            self.num_modules,
+            self.module_hidden,
+            self.gating_hidden,
+            self.num_gating_layers,
+            self.n_task,
+            self.activations,
+        )(observations, actions)
         return q_values
 
 

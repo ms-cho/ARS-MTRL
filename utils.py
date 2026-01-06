@@ -1,6 +1,16 @@
+import sys
+from pathlib import Path
+
 import numpy as np
 import wandb
 import gym
+
+# Prefer the local metaworld package in this repo over any installed version.
+_REPO_ROOT = Path(__file__).resolve().parent
+_LOCAL_METAWORLD = _REPO_ROOT / "metaworld"
+if _LOCAL_METAWORLD.exists():
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import metaworld
 
 import wrappers

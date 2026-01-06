@@ -1,5 +1,8 @@
+"""Unified multi-task (multi-head) SAC learner with optional PCGrad support."""
+
 from typing import Optional, Sequence, Tuple
 
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -7,10 +10,17 @@ import optax
 
 import policy
 import value_net
-from actor import sac_update_actor
-from common import Batch, InfoDict, Model, PRNGKey, MultiModel, activation_func
-from critic import sac_update_alpha, sac_update_q
-import flax.linen as nn
+from actor import sac_update_actor, sac_update_actor_pcgrad
+from common import (
+    Batch,
+    InfoDict,
+    Model,
+    MultiModel,
+    MultiModelPCGrad,
+    PRNGKey,
+    activation_func,
+)
+from critic import sac_update_alpha, sac_update_q, sac_update_q_pcgrad
 
 
 def target_update(critic: Model, target_critic: Model, tau: float) -> Model:
@@ -32,7 +42,6 @@ def _update_jit(
     tau: float,
     target_entropy: float,
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
-
     key, rng = jax.random.split(rng)
     new_critic, critic_info = sac_update_q(
         key, actor, critic, target_critic, alpha, batch, discount
@@ -40,6 +49,43 @@ def _update_jit(
 
     key, rng = jax.random.split(rng)
     new_actor, actor_info = sac_update_actor(key, actor, new_critic, alpha, batch)
+    new_alpha, alpha_info = sac_update_alpha(
+        alpha, actor_info["log_pi"], target_entropy
+    )
+
+    new_target_critic = target_update(new_critic, target_critic, tau)
+
+    return (
+        rng,
+        new_actor,
+        new_critic,
+        new_target_critic,
+        new_alpha,
+        {**critic_info, **actor_info, **alpha_info},
+    )
+
+
+@jax.jit
+def _update_jit_pcgrad(
+    rng: PRNGKey,
+    actor: Model,
+    critic: Model,
+    target_critic: Model,
+    alpha: Model,
+    batch: Batch,
+    discount: float,
+    tau: float,
+    target_entropy: float,
+) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
+    key, rng = jax.random.split(rng)
+    new_critic, critic_info = sac_update_q_pcgrad(
+        key, actor, critic, target_critic, alpha, batch, discount
+    )
+
+    key, rng = jax.random.split(rng)
+    new_actor, actor_info = sac_update_actor_pcgrad(
+        key, actor, new_critic, alpha, batch
+    )
     new_alpha, alpha_info = sac_update_alpha(
         alpha, actor_info["log_pi"], target_entropy
     )
@@ -74,18 +120,27 @@ class Learner(object):
         softplus: bool = True,
         critic_layernorm: bool = False,
         critic_init_layernorm: bool = False,
-        activation: str = "relu",
+        activation: str = "tanh",
         multi_head: bool = False,
+        use_pcgrad: bool = False,
     ):
+        """
+        Multi-task SAC learner. Toggle `use_pcgrad` to enable PCGrad projection of
+        per-task gradients; toggle `multi_head` to build separate policy heads.
+        """
 
         self.tau = tau
         self.discount = discount
         self.n_task = n_task
+        self.use_pcgrad = use_pcgrad
 
         critic_base_opt = optax.adam
         actor_base_opt = optax.adam
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, alpha_key = jax.random.split(rng, 4)
+        actor_p_key = critic_p_key = None
+        if use_pcgrad:
+            rng, actor_p_key, critic_p_key = jax.random.split(rng, 3)
 
         action_dim = actions.shape[-1]
         self.target_entropy = -float(action_dim)
@@ -104,18 +159,36 @@ class Learner(object):
             "name": "actor",
             "softplus": softplus,
         }
+        init_observations = observations
+        init_actions = actions
         if multi_head:
             actor_kwargs["n_task"] = n_task
-            observations = observations[np.newaxis]
-            actions = actions[np.newaxis]
+            init_observations = observations[np.newaxis]
+            init_actions = actions[np.newaxis]
         actor_def = actor_cls(**actor_kwargs)
 
+        def _create_model(model_def, inputs, tx=None, rng_key=None):
+            if use_pcgrad:
+                return MultiModelPCGrad.create(
+                    model_def,
+                    inputs=inputs,
+                    tx=tx,
+                    n_task=n_task,
+                    rng=rng_key,
+                )
+            return MultiModel.create(
+                model_def,
+                inputs=inputs,
+                tx=tx,
+                n_task=n_task,
+            )
+
         actor_optimiser = actor_base_opt(learning_rate=actor_lr)
-        actor = MultiModel.create(
+        actor = _create_model(
             actor_def,
-            inputs=[actor_key, observations],
+            inputs=[actor_key, init_observations],
             tx=actor_optimiser,
-            n_task=n_task,
+            rng_key=actor_p_key,
         )
 
         alpha_def = value_net.Alpha(name="alpha", init_value=jnp.ones((n_task, 1)))
@@ -134,15 +207,16 @@ class Learner(object):
             layer_norm=critic_layernorm,
             init_layer_norm=critic_init_layernorm,
         )
-        critic = MultiModel.create(
+        critic = _create_model(
             critic_def,
-            inputs=[critic_key, observations, actions],
+            inputs=[critic_key, init_observations, init_actions],
             tx=critic_base_opt(learning_rate=critic_lr),
-            n_task=n_task,
+            rng_key=critic_p_key,
         )
-
-        target_critic = MultiModel.create(
-            critic_def, inputs=[critic_key, observations, actions], n_task=n_task
+        target_critic = _create_model(
+            critic_def,
+            inputs=[critic_key, init_observations, init_actions],
+            rng_key=critic_p_key,
         )
         self.actor = actor
         self.alpha = alpha
@@ -150,6 +224,7 @@ class Learner(object):
         self.models = {"alpha": self.alpha, "actor": self.actor, "critic": self.critic}
         self.target_critic = target_critic
 
+        self._update_fn = _update_jit_pcgrad if use_pcgrad else _update_jit
         self.rng = rng
 
     def sample_actions(
@@ -178,7 +253,7 @@ class Learner(object):
 
     def update(self, batch: Batch) -> InfoDict:
         new_rng, new_actor, new_critic, new_target_critic, new_alpha, info = (
-            _update_jit(
+            self._update_fn(
                 self.rng,
                 self.actor,
                 self.critic,
