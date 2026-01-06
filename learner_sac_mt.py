@@ -8,14 +8,7 @@ import optax
 import policy
 import value_net
 from actor import sac_update_actor
-from common import (
-    Batch,
-    InfoDict,
-    Model,
-    PRNGKey,
-    MultiModel,
-    activation_func,
-)
+from common import Batch, InfoDict, Model, PRNGKey, MultiModel, activation_func
 from critic import sac_update_alpha, sac_update_q
 import flax.linen as nn
 
@@ -82,6 +75,7 @@ class Learner(object):
         critic_layernorm: bool = False,
         critic_init_layernorm: bool = False,
         activation: str = "relu",
+        multi_head: bool = False,
     ):
 
         self.tau = tau
@@ -96,17 +90,25 @@ class Learner(object):
         action_dim = actions.shape[-1]
         self.target_entropy = -float(action_dim)
 
-        actor_def = policy.NormalTanhPolicy(
-            hidden_dims,
-            action_dim,
-            log_std_min=-5.0,
-            dropout_rate=dropout_rate,
-            state_dependent_std=True,
-            tanh_squash_distribution=True,
-            activations=nn.relu,
-            name="actor",
-            softplus=softplus,
+        actor_cls = (
+            policy.NormalTanhMulitHeadPolicy if multi_head else policy.NormalTanhPolicy
         )
+        actor_kwargs = {
+            "hidden_dims": hidden_dims,
+            "action_dim": action_dim,
+            "log_std_min": -5.0,
+            "dropout_rate": dropout_rate,
+            "state_dependent_std": True,
+            "tanh_squash_distribution": True,
+            "activations": nn.relu,
+            "name": "actor",
+            "softplus": softplus,
+        }
+        if multi_head:
+            actor_kwargs["n_task"] = n_task
+            observations = observations[np.newaxis]
+            actions = actions[np.newaxis]
+        actor_def = actor_cls(**actor_kwargs)
 
         actor_optimiser = actor_base_opt(learning_rate=actor_lr)
         actor = MultiModel.create(

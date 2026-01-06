@@ -38,19 +38,17 @@ class Config:
     activation: str = "relu"
     rank: int = 16  # 8 for MT10, 16 for MT50
     # training params
-    domain: str = "metaworld"
-    env_name: str = "MT10"
     batch_size: int = 100
     max_steps: int = int(2e6)
     log_interval: int = 1000
     n_reset: int = 4
     threshold: float = 0.65  # 0.8 for MT10, 0.65 for MT50
-    schedule_interval: int = int(1e3)
-    opt_decay_schedule: str = ""
     replay_buffer_size: int = int(1e6)
     initial_step: int = int(25e3)
     n_train_per_step: int = 1
     # env params
+    domain: str = "metaworld"
+    env_name: str = "MT10"
     max_path_length: int = 500
     # evaluation params
     eval_episodes: int = 1

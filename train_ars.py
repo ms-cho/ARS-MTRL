@@ -22,7 +22,6 @@ class Config:
     project: str = "MTRL"
     group: str = ""
     name: str = ""
-    use_ars: bool = True
     # model params
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
@@ -35,20 +34,20 @@ class Config:
     critic_layernorm: bool = False
     critic_init_layernorm: bool = False
     dropout_rate: float = -1.0  # -1.0 means no dropout
-    activation: str = "relu"
+    activation: str = "tanh"
+    multi_head: bool = False
     # training params
-    domain: str = "metaworld"
-    env_name: str = "MT10"
+    use_ars: bool = True
     batch_size: int = 100
     max_steps: int = int(2e6)
     log_interval: int = 1000
     n_reset: int = 4
-    schedule_interval: int = int(1e3)
-    opt_decay_schedule: str = ""
     replay_buffer_size: int = int(1e6)
     initial_step: int = int(25e3)
     n_train_per_step: int = 1
     # env params
+    domain: str = "metaworld"
+    env_name: str = "MT10"
     max_path_length: int = 500
     # evaluation params
     eval_episodes: int = 1
@@ -66,18 +65,19 @@ class Config:
             r_interval = reset_interval / 1e5
 
         if self.use_ars:
-            alg_name = "ARS"
+            alg_name = "ARS(SAC-MT-MH)" if self.multi_head else "ARS(SAC-MT)"
         else:
-            alg_name = "SAC-MT"
+            alg_name = "SAC-MT-MH" if self.multi_head else "SAC-MT"
         if self.critic_layernorm and self.critic_init_layernorm:
             alg_name += "-LN-ILN"
         elif self.critic_layernorm:
             alg_name += "-LN"
 
-        if self.use_ars:
-            self.name = f"{alg_name}-NReset{self.n_reset}-Interval{r_interval}e5"
-        else:
-            self.name = f"{alg_name}"
+        self.name = (
+            f"{alg_name}-NReset{self.n_reset}-Interval{r_interval}e5"
+            if self.use_ars
+            else f"{alg_name}"
+        )
 
 
 def setup_envs(config: Config):
@@ -117,6 +117,7 @@ def main(config: Config):
 
     kwargs_ = asdict(config)
     kwargs_["hidden_dims"] = tuple([config.hidden_dim for _ in range(config.n_layer)])
+    kwargs_["multi_head"] = config.multi_head
     learner_args = inspect.signature(Learner).parameters.keys()
     kwargs = {k: v for k, v in kwargs_.items() if k in learner_args}
     agent = None

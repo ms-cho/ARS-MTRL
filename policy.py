@@ -113,6 +113,108 @@ class NormalTanhPolicy(nn.Module):
                     return base_dist
 
 
+class NormalTanhMulitHeadPolicy(nn.Module):
+    hidden_dims: Sequence[int]
+    action_dim: int
+    n_task: int = 1
+    state_dependent_std: bool = True
+    dropout_rate: Optional[float] = None
+    log_std_scale: float = 1.0
+    log_std_min: Optional[float] = None
+    log_std_max: Optional[float] = None
+    tanh_squash_distribution: bool = True
+    softplus: bool = True
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    dtype: Optional[Dtype] = jnp.float32
+    name: str = "actor"
+
+    @nn.compact
+    def __call__(
+        self,
+        observations: jnp.ndarray,
+        temperature: float = 1.0,
+        training: bool = False,
+        with_logstd: bool = False,
+        deterministic: bool = False,
+    ) -> tfd.Distribution:
+        outputs = MLP(
+            self.hidden_dims,
+            activations=self.activations,
+            activate_final=True,
+            dropout_rate=self.dropout_rate,
+            dtype=self.dtype,
+        )(observations, training=training)
+
+        means = nn.Dense(
+            self.action_dim * self.n_task,
+            dtype=self.dtype,
+            kernel_init=default_init(),
+            name="means",
+        )(outputs)
+
+        if self.state_dependent_std:
+            log_stds = nn.Dense(
+                self.action_dim * self.n_task,
+                kernel_init=default_init(self.log_std_scale),
+                name="log_stds",
+            )(outputs)
+        else:
+            log_stds = self.param(
+                "log_stds", nn.initializers.zeros, (self.action_dim * self.n_task,)
+            )
+        if self.softplus:
+            scale = nn.softplus(log_stds) + 1e-5
+            log_stds = jnp.log(scale)
+        else:
+            log_std_min = self.log_std_min or LOG_STD_MIN
+            log_std_max = self.log_std_max or LOG_STD_MAX
+            log_stds = jnp.clip(log_stds, log_std_min, log_std_max)
+            scale = jnp.exp(log_stds)
+
+        shape = (means.shape[0], -1) + (self.n_task, self.action_dim)
+        means = means.reshape(shape)
+        log_stds = log_stds.reshape(shape)
+        scale = scale.reshape(shape)
+
+        task_indices = jnp.arange(observations.shape[0])
+        means = means[task_indices, :, task_indices, :]
+        log_stds = log_stds[task_indices, :, task_indices, :]
+        scale = scale[task_indices, :, task_indices, :]
+
+        if not self.tanh_squash_distribution:
+            means = nn.tanh(means)
+
+        base_dist = tfd.MultivariateNormalDiag(
+            loc=means, scale_diag=scale * temperature
+        )
+
+        if self.tanh_squash_distribution:
+            if deterministic:
+                if with_logstd:
+                    return means, log_stds
+                else:
+                    return nn.tanh(means)
+            else:
+                dist = tfd.TransformedDistribution(
+                    distribution=base_dist, bijector=tfb.Tanh()
+                )
+                if with_logstd:
+                    return dist, log_stds
+                else:
+                    return dist
+        else:
+            if deterministic:
+                if with_logstd:
+                    return means, log_stds
+                else:
+                    return means
+            else:
+                if with_logstd:
+                    return base_dist, log_stds
+                else:
+                    return base_dist
+
+
 class LoRANormalTanhPolicy(nn.Module):
     hidden_dims: Sequence[int]
     action_dim: int
