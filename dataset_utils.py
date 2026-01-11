@@ -292,9 +292,9 @@ class MultiTaskReplayBuffer(Dataset):
         if rew_scale is None:
             rew_scale = np.ones((self.n_task, 1))
         if use_next_actions:
-            indx = np.random.randint(self.size - 1, size=batch_size)
+            indx = np.random.randint(self.size - 1, size=(self.n_task, batch_size))
         else:
-            indx = np.random.randint(self.size, size=batch_size)
+            indx = np.random.randint(self.size, size=(self.n_task, batch_size))
 
         if norm_rew:
             rewards = normalize_reward(

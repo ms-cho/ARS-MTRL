@@ -112,7 +112,11 @@ def run_eval(step, agent, eval_env, eval_episodes, n_envs, env_names, env_name):
 
 
 def make_benchmark(
-    domain: str, benchmark_name: str, seed: int, max_path_length: int = 500
+    domain: str,
+    benchmark_name: str,
+    seed: int,
+    max_path_length: int = 500,
+    rand_g: bool = True,
 ) -> gym.Env:
     try:
         benchmark_class = getattr(metaworld, benchmark_name)
@@ -130,7 +134,7 @@ def make_benchmark(
     for env_id, env_cls in enumerate(benchmark.train_classes.values()):
         env = env_cls()
         env.set_task(tasks[env_id * 50])
-        env._freeze_rand_vec = False
+        env._freeze_rand_vec = not rand_g
 
         env = wrappers.EpisodeMonitor(env)
 

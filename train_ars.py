@@ -3,7 +3,7 @@ import inspect
 
 import uuid
 import numpy as np
-import tqdm, pdb
+import tqdm
 import math
 import pyrallis
 import wandb
@@ -25,7 +25,7 @@ class Config:
     # model params
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
-    value_lr: float = 3e-4
+    alpha_lr: float = 3e-4
     hidden_dim: int = 400
     n_layer: int = 4
     discount: float = 0.99
@@ -66,7 +66,7 @@ class Config:
             r_interval = reset_interval / 1e5
 
         if self.use_ars:
-            alg_name = "ARS(SAC-MT-MH)" if self.multi_head else "ARS(SAC-MT)"
+            alg_name = "ARS(SAC-MT-MH)" if self.multi_head else "ARS"
         else:
             alg_name = "SAC-MT-MH" if self.multi_head else "SAC-MT"
         if self.use_pcgrad:

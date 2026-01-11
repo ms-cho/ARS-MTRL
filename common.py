@@ -5,12 +5,11 @@ from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 import functools
 import flax
 import flax.linen as nn
-import flax.training
+from jax import lax
 import jax
 import jax.numpy as jnp
 import optax
 from flax.training import checkpoints
-from flax.training import dynamic_scale as dynamic_scale_lib
 from jax.flatten_util import ravel_pytree
 
 Batch = collections.namedtuple(
@@ -19,6 +18,7 @@ Batch = collections.namedtuple(
 
 default_kernel_init = nn.initializers.lecun_normal()
 default_bias_init = nn.initializers.zeros
+EPS = 1e-8
 
 
 def activation_func(activation_name: str = "relu"):
@@ -174,6 +174,53 @@ def project_single_grad(grad_i, all_grads):
     # (Optional) track how many negative dot products we encountered
     # or just skip it if you don't need that stat
     return final_grad, (proj_coeffs < 0).sum()  # or other info if desired
+
+
+def gram_schmidt_single(sample_vectors):
+    # no jit here
+    n_models, dim = sample_vectors.shape
+    basis = jnp.zeros((n_models, dim))
+    v = sample_vectors[0]
+    v = v / jnp.linalg.norm(v)
+    basis = basis.at[0].set(v)
+    # for i in range(1, n_models):
+    #     v = sample_vectors[i]
+    #     for j in range(i):
+    #         v = v - jnp.dot(v, basis[j]) * basis[j]
+    #     v = v / jnp.linalg.norm(v)
+    #     basis = basis.at[i].set(v)
+
+    for i in range(1, n_models):
+        v = sample_vectors[i]
+        B = basis[:i]
+        coeffs = B @ v
+        v = v - (coeffs @ B)
+        v = v / (jnp.linalg.norm(v))
+        basis = basis.at[i].set(v)
+    return basis
+
+
+def gram_schmidt_single2(x: jnp.ndarray) -> jnp.ndarray:
+    n, d = x.shape
+    basis0 = jnp.zeros((n, d), dtype=x.dtype)
+
+    v0 = x[0]
+    v0 = v0 / (jnp.linalg.norm(v0) + EPS)
+    basis0 = basis0.at[0].set(v0)
+
+    def body(i, basis):
+        # project x[i] onto span(basis[:i])
+        v = x[i]
+        # Use full basis with zeros for rows >= i to keep shapes static.
+        coeffs = basis @ v
+        proj = coeffs @ basis
+
+        w = v - proj
+        w = w / (jnp.linalg.norm(w) + EPS)
+        return basis.at[i].set(w)
+
+    basis = lax.fori_loop(1, n, body, basis0)
+    return basis
 
 
 def default_init(scale: Optional[float] = jnp.sqrt(2)):
@@ -465,6 +512,43 @@ class ModularGatedNet(nn.Module):
         if return_weights:
             return out, weights_list, last_weight
         return out
+
+
+class OrthogonalLayer1D(nn.Module):
+    """
+    Gram-Schmidt across axis=0 (n_experts), for input shape:
+        [n_experts, n_task, batch_size, dim].
+    Outputs the same shape, with row vectors orthonormal per sample.
+    """
+
+    @nn.compact
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        """
+        x shape => [n_experts, n_task, batch_size, dim]
+        """
+
+        # @jax.jit
+        def forward_fn(x_jit: jnp.ndarray) -> jnp.ndarray:
+            # 1) [n_experts, n_task, batch_size, dim] => [n_task, batch_size, n_experts, dim]
+            x_t = x_jit.transpose(1, 2, 0, 3)
+
+            # 2) Flatten [n_task, batch_size, n_experts, dim] => [N, n_experts, dim]
+            n_task, batch_size, n_experts, dim = x_t.shape
+            x_flat = x_t.reshape((n_task * batch_size, n_experts, dim))
+
+            # 3) Gram-Schmidt over the flattened batch => [N, n_experts, dim]
+            # batched_gram_schmidt = jax.jit(
+            #     jax.vmap(gram_schmidt_single, in_axes=0, out_axes=0)
+            # )
+            batched_gram_schmidt = jax.vmap(gram_schmidt_single, in_axes=0, out_axes=0)
+            # batched_gram_schmidt = jax.vmap(gram_schmidt_single2, in_axes=0, out_axes=0)
+
+            orth_flat = batched_gram_schmidt(x_flat)
+            # 4) Reshape back => [n_task, batch_size, n_experts, dim]
+            orth_unflat = orth_flat.reshape((n_task, batch_size, n_experts, dim))
+            return orth_unflat
+
+        return forward_fn(x)
 
 
 @flax.struct.dataclass

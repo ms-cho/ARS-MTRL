@@ -83,3 +83,29 @@ def softmodular_update_actor(
 
     new_actor, info = actor.apply_gradient(actor_loss_fn)
     return new_actor, info
+
+
+def moore_update_actor(
+    key: PRNGKey, actor: Model, critic: Model, alpha: Model, batch: Batch
+) -> Tuple[Model, InfoDict]:
+    alpha_value = alpha()
+
+    def actor_loss_fn(
+        actor_params: Params, task_id=None
+    ) -> Tuple[jnp.ndarray, InfoDict]:
+        dist = actor.apply({"params": actor_params}, batch.observations)
+        actions = dist.sample(seed=key)
+
+        qs = critic(batch.observations, actions)
+        q = jnp.min(qs, axis=0)
+        log_probs = dist.log_prob(actions)
+        actor_loss = alpha_value * log_probs - q
+
+        return actor_loss[task_id].mean(), {
+            "actor_loss": actor_loss.mean(axis=-1),
+            "q_actor": q.mean(axis=-1),
+            "log_pi": log_probs.mean(axis=-1),
+        }
+
+    new_actor, info = actor.apply_gradient(actor_loss_fn)
+    return new_actor, info

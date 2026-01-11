@@ -183,11 +183,11 @@ class Learner(object):
                 n_task=n_task,
             )
 
-        actor_optimiser = actor_base_opt(learning_rate=actor_lr)
+        actor_opt = actor_base_opt(learning_rate=actor_lr)
         actor = _create_model(
             actor_def,
             inputs=[actor_key, init_observations],
-            tx=actor_optimiser,
+            tx=actor_opt,
             rng_key=actor_p_key,
         )
 

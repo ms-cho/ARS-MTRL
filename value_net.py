@@ -3,7 +3,14 @@ from typing import Callable, Sequence, Optional, Dict
 import jax.numpy as jnp
 from flax import linen as nn
 
-from common import MLP, Dtype, LoRAMulti_MLP, ModularGatedNet
+from common import (
+    MLP,
+    Dtype,
+    LoRAMulti_MLP,
+    ModularGatedNet,
+    OrthogonalLayer1D,
+    default_init,
+)
 
 
 class Critic(nn.Module):
@@ -196,6 +203,98 @@ class EnsembleModularGatedCritic(nn.Module):
             self.num_gating_layers,
             self.n_task,
             self.activations,
+        )(observations, actions)
+        return q_values
+
+
+class CriticMixtureMH(nn.Module):
+    hidden_dims: Sequence[int]
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    n_task: int = 1
+    n_expert: int = 4
+    dropout_rate: Optional[float] = -1
+    layer_norm: bool = False
+    init_layer_norm: bool = False
+    dtype: Optional[Dtype] = jnp.float32
+
+    @nn.compact
+    def __call__(self, observations: jnp.ndarray, actions: jnp.ndarray) -> jnp.ndarray:
+        n_task, batch_size, obs_dim = observations.shape
+        inputs = jnp.concatenate([observations, actions], -1)
+
+        ensemble = nn.vmap(
+            target=MLP,
+            in_axes=None,
+            out_axes=0,
+            variable_axes={"params": 0},
+            split_rngs={"params": True},
+            axis_size=self.n_expert,
+        )
+        hs = ensemble(  # shape => [n_task, batch_size, n_expert, hidden_dims[-1]]
+            (*self.hidden_dims,),
+            self.activations,
+            False,
+            self.dropout_rate,
+            self.layer_norm,
+            self.init_layer_norm,
+            self.dtype,
+        )(inputs)
+        features = OrthogonalLayer1D()(hs)
+        # features = OrthogonalLayerQR()(hs)
+
+        task_context = jnp.repeat(
+            jnp.expand_dims(jnp.eye(self.n_task)[jnp.arange(n_task)], axis=-2),
+            batch_size,
+            axis=1,
+        )
+        w = nn.Dense(  # shape => [n_task, batch_size, n_expert]
+            self.n_expert, dtype=self.dtype, kernel_init=default_init(), use_bias=False
+        )(task_context)
+
+        features = jnp.squeeze(jnp.expand_dims(w, axis=-2) @ features, axis=-2)
+        features = nn.tanh(features)  # shape => [n_task, batch_size, hidden_dims[-1]]
+
+        q_values = nn.Dense(self.n_task, dtype=self.dtype, kernel_init=default_init())(
+            features
+        )  # shape => [n_task, batch_size, n_task]
+        task_indices = jnp.arange(observations.shape[0])
+        q = q_values[task_indices, :, task_indices]
+
+        return q
+
+
+class EnsembleCriticMixtureMH(nn.Module):
+    hidden_dim: Sequence[int]
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    n_ensemble: int = 10
+    n_task: int = 1
+    n_expert: int = 4
+    dropout_rate: Optional[float] = -1
+    layer_norm: bool = False
+    init_layer_norm: bool = False
+    dtype: Optional[Dtype] = jnp.float32
+    name: str = "critic"
+
+    @nn.compact
+    def __call__(self, observations: jnp.ndarray, actions: jnp.ndarray) -> jnp.ndarray:
+        ensemble = nn.vmap(
+            target=CriticMixtureMH,
+            in_axes=None,
+            out_axes=0,
+            variable_axes={"params": 0},
+            split_rngs={"params": True},
+            axis_size=self.n_ensemble,
+        )
+
+        q_values = ensemble(
+            self.hidden_dim,
+            self.activations,
+            self.n_task,
+            self.n_expert,
+            self.dropout_rate,
+            self.layer_norm,
+            self.init_layer_norm,
+            self.dtype,
         )(observations, actions)
         return q_values
 

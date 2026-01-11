@@ -1,5 +1,6 @@
 import os
 import inspect
+import random
 
 import uuid
 import numpy as np
@@ -9,7 +10,7 @@ import pyrallis
 import wandb
 from dataclasses import dataclass, asdict
 
-from learner_softmodular import Learner
+from learner_moore import Learner
 from dataset_utils import MultiTaskReplayBuffer
 import utils
 
@@ -25,18 +26,12 @@ class Config:
     # model params
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
-    base_hidden_dim: int = 400
-    num_base_layers: int = 2
-    em_hidden_dim: int = 400
-    num_em_layers: int = 1
-    num_layers: int = 2
-    num_modules: int = 2
-    module_hidden: int = 256
-    gating_hidden: int = 256
-    num_gating_layers: int = 2
+    hidden_dim: int = 400
+    n_layer: int = 3
     discount: float = 0.99
     tau: float = 5e-3
     n_critic: int = 2
+    n_expert: int = 4
     dropout_rate: float = -1.0  # -1.0 means no dropout
     activation: str = "tanh"
     # training params
@@ -46,7 +41,8 @@ class Config:
     log_interval: int = 1000
     n_reset: int = 4
     replay_buffer_size: int = int(1e6)
-    initial_step: int = int(25e3)
+    initial_step: int = 1500
+    warmup_step: int = 3000
     n_train_per_step: int = 1
     # env params
     domain: str = "metaworld"
@@ -67,7 +63,7 @@ class Config:
         else:
             r_interval = reset_interval / 1e5
 
-        alg_name = "ARS(SoftModule)" if self.use_ars else "SoftModule"
+        alg_name = "ARS(MOORE)" if self.use_ars else "MOORE"
 
         self.name = (
             f"{alg_name}-NReset{self.n_reset}-Interval{r_interval}e5"
@@ -78,7 +74,7 @@ class Config:
 
 def setup_envs(config: Config):
     envs, env_names, tasks = utils.make_benchmark(
-        config.domain, config.env_name, config.seed, config.max_path_length
+        config.domain, config.env_name, config.seed, config.max_path_length, False
     )
     env_names = list(env_names)
     env = utils.wrappers.MultiParallelEnvExecutor(envs)
@@ -97,7 +93,7 @@ def setup_envs(config: Config):
     )
     eval_env = utils.wrappers.MultiParallelEnvExecutor(eval_envs, 10, eval_tasks)
 
-    return env, eval_env, env_names, action_dim, n_envs
+    return env, eval_env, env_names, action_dim, n_envs, tasks
 
 
 def main(config: Config):
@@ -109,18 +105,19 @@ def main(config: Config):
         id=str(uuid.uuid4()),
     )
 
-    env, eval_env, env_names, action_dim, n_envs = setup_envs(config)
-    kwargs_ = asdict(config)
-    kwargs_["base_hidden_dims"] = tuple(
-        [config.base_hidden_dim for _ in range(config.num_base_layers)]
-    )
-    kwargs_["em_hidden_dims"] = tuple(
-        [config.base_hidden_dim for _ in range(config.num_em_layers)]
-    )
+    env, eval_env, env_names, action_dim, n_envs, tasks = setup_envs(config)
 
+    kwargs_ = asdict(config)
+    kwargs_["hidden_dims"] = tuple([config.hidden_dim for _ in range(config.n_layer)])
     learner_args = inspect.signature(Learner).parameters.keys()
+
     kwargs = {k: v for k, v in kwargs_.items() if k in learner_args}
-    agent = None
+    agent = Learner(
+        observations=env.observation_space.sample()[np.newaxis][np.newaxis],
+        actions=env.action_space.sample()[np.newaxis][np.newaxis],
+        n_task=n_envs,
+        **kwargs,
+    )
 
     replay_buffer = MultiTaskReplayBuffer(
         env.observation_space,
@@ -149,13 +146,6 @@ def main(config: Config):
                         np.max(mean_rews) / np.maximum(mean_rews, 0.01), (n_envs, 1)
                     )
                     utils.log_rew_scale(i, rew_scale, env_names)
-
-                agent = Learner(
-                    observations=env.observation_space.sample()[np.newaxis],
-                    actions=env.action_space.sample()[np.newaxis],
-                    n_task=n_envs,
-                    **kwargs,
-                )
             actions = agent.sample_actions(np.array(observations), distribution="stc")
         else:
             actions = [env.action_space.sample() for _ in range(n_envs)]
@@ -180,6 +170,9 @@ def main(config: Config):
         observations = next_observations
 
         if all(dones):
+            env.set_tasks(
+                [random.sample(tasks_per_env, k=1) for tasks_per_env in tasks.values()]
+            )
             observations, dones = env.reset(), False
             if i % config.log_interval:
                 utils.log_episode_info(i, infos, env_names, config.env_name, success)
@@ -189,7 +182,10 @@ def main(config: Config):
             sample_kwargs = {"rew_scale": rew_scale} if config.use_ars else {}
             for _ in range(config.n_train_per_step):
                 batch = replay_buffer.sample(config.batch_size, **sample_kwargs)
-                update_info = agent.update(batch)
+                update_info = agent.update(
+                    batch,
+                    critic_only=(i <= config.warmup_step),
+                )
 
             if i % config.log_interval == 0:
                 utils.log_update_metrics(i, update_info, env_names)
