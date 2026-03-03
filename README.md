@@ -85,9 +85,10 @@ python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_
 If you use this **ARS (Adaptive Reward Scaling) multi-task reinforcement learning** codebase, please cite:
 
 ```bibtex
-@inproceedings{ars_icml2025,
-  title     = {ARS: Adaptive Reward Scaling for Multi-Task Reinforcement Learning},
-  booktitle = {International Conference on Machine Learning (ICML)},
+@inproceedings{cho2025ars,
+  title	    = {ARS: Adaptive Reward Scaling for Multi-Task Reinforcement Learning},
+  author    = {Cho, Myungsik and Park, Jongeui and Kim, Jeonghye and Sung, Youngchul},
+  booktitle = {Forty-second International Conference on Machine Learning}
   year      = {2025}
 }
 ```
