@@ -1,13 +1,24 @@
-# ARS: Adaptive Reward Scaling for Multi-Task Reinforcement Learning submitted in ICML 25
+# ARS: Adaptive Reward Scaling for Multi-Task Reinforcement Learning (ICML 2025) — Official GitHub Repository
+
+This is the **official GitHub code release** for **“ARS: Adaptive Reward Scaling for Multi-Task Reinforcement Learning” (ICML 2025)**.
+
+---
+
+## Overview
+
+ARS is a reward scaling method designed for **multi-task reinforcement learning (MT-RL)**. This repository contains training and evaluation code for Meta-World **MT10** and **MT50**, including an optional **LoRA** variant.
+
+---
 
 ## How to run the code
 
 ### Install dependencies
 
+
 ```bash
 conda create -n ARS python=3.9
 conda activate ARS
-conda install gcc==12.1.0  or  conda install -c conda-forge libstdcxx-ng=12
+conda install gcc==12.1.0  or  conda install -c conda-forge libstdcxx-ng=12hyyy7u
 ```
 
 ```bash
@@ -67,5 +78,22 @@ python run_experiments.py --main_module_name train_ars --seeds 1 2 3 4 --config_
 ```
 
 
+---
+
+## Citation
+
+If you use this **ARS (Adaptive Reward Scaling) multi-task reinforcement learning** codebase, please cite:
+
+```bibtex
+@inproceedings{ars_icml2025,
+  title     = {ARS: Adaptive Reward Scaling for Multi-Task Reinforcement Learning},
+  booktitle = {International Conference on Machine Learning (ICML)},
+  year      = {2025}
+}
+```
+
+---
+
 ## Misc
+
 The implementation is based on [JAXRL](https://github.com/ikostrikov/jaxrl).
